@@ -1,0 +1,53 @@
+suppressPackageStartupMessages({
+library(gwasrapidd)
+library(dplyr)
+library(stringr)
+})
+# Interval (GRCh38)
+gr <- list(
+chromosome = 13,
+start = 103888078,
+end = 104080831
+)
+eye_regex <- "retina|retinal|macula|macular|glaucoma|optic|vision|ocular|
+eye|myopia|cataract|retinopathy"
+# 1. Retrieve all GWAS Catalog variants in the interval
+v <- get_variants(genomic_range = gr)
+v_df <- v@variants
+# 2. Retrieve associations for interval variants
+variant_ids <- unique(v_df$variant_id)
+variant_ids <- variant_ids[!is.na(variant_ids)]
+a <- get_associations(variant_id = variant_ids)
+a_df <- a@associations
+ra_df <- a@risk_alleles
+# 3. Retrieve study metadata and identify eye/retina-related studies
+st <- get_studies(association_id = a_df$association_id)
+st_df <- st@studies
+eye_studies <- st_df %>%
+filter(str_detect(str_to_lower(reported_trait), eye_regex))
+# 4. Extract eye/retina-associated variants and intersect with queried interval
+a_eye <- get_associations(study_id = eye_studies$study_id)
+eye_hits <- a_eye@risk_alleles %>%
+left_join(a_eye@associations, by = "association_id") %>%
+filter(variant_id %in% variant_ids) %>%
+left_join(
+v_df %>%
+select(
+variant_id,
+chromosome_name,
+chromosome_position,
+functional_class
+),
+by = "variant_id"
+) %>%
+mutate(
+study_id = eye_studies$study_id[1],
+reported_trait = eye_studies$reported_trait[1],
+initial_sample_size = eye_studies$initial_sample_size[1],
+replication_sample_size = eye_studies$replication_sample_size[1]
+) %>%
+arrange(pvalue)
+# 5. Summary values used in the manuscript
+n_interval_variants <- nrow(v_df) # expected: 18
+rs2575134_row <- eye_hits %>%
+filter(variant_id == "rs2575134")
