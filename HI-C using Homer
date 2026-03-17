@@ -1,0 +1,56 @@
+#Processing HI-C from arima using homer
+# Trimming reads
+#The reads should be trimmed and aligned separately (do not perform paired-end alignment with HOMER)
+#Make sure you have the correct restriction enzyme used in the Hi-C assay
+#Note: When utilizing libraries generated with the Arima Hi-C library prep kit, we suggest trimming 5 bases from the 5’ end of both read 1 and read 2 before using the Arima mapping pipeline. The purpose of this modification is to remove over-represented 3bp molecular barcode UMI sequences and 2 dark bases from the 5’ end of reads, resulting in improved results.
+
+
+#Trimming R1
+homerTools trim -5 restrictionenzyme -mis 0 -matchStart 20 -min 20 path/<file_R1.fq.gz>
+
+#Trimming R2
+homerTools trim -5 restrictionenzyme -mis 0 -matchStart 20 -min 20 path/<file_R2.fq.gz>
+
+#Alignment reads
+#Alignment R1
+bowtie2 -p 17 -x path/<genomename> -U <_1.fq.gz.trimmed> > <filename>trimmed_1.sam
+
+#Alignment R2
+bowtie2 -p 17 -x path/<genomename> -U <filename_2.fq.gz.trimmed> > <filename>trimmed_2.sam
+
+#Create a Hi-C Tag Directory with HOMER
+makeTagDirectory <tagDirctoryname> <filename>trimmed_1.sam,<filename>trimmed_2.sam -tbp 1 -removePEbg -genome path/<genome.fasta> -checkGC -restrictionSite <yourrescrictionSite>
+
+#Create one Tag Directory for each sample. 
+
+
+#Create a hic file with HOMER
+
+tagDir2hicFile.pl  <tagDirectory> -juicer auto -genome path/<genome.fasta>  -p 60
+
+#Create one hic file for each sample. 
+
+
+#Finding TADS and loops 
+findTADsAndLoops.pl find <tadDirectory>  -cpu 15 -res 5000,10000,25000 -window 35000,50000,75000 -genome path/<yourgenome,fasta> -o  output_
+
+
+#Merge TADS and loops by condition 
+ merge2Dbed.pl  <nameofyourfile>.loop.2D.bed <nameofyourfile>.loop.2D.bed >  <nameofyourfile>_merged.loop.2D.bed
+
+ merge2Dbed.pl  <nameofyourfile>.tad.2D.bed <nameofyourfile>.tad.2D.bed >  <nameofyourfile>_merged.tad.2D.bed
+
+#Merge all conditions
+
+merge2Dbed.pl <nameofyourfilecond1>.loop.2D.bed <nameofyourfilecond2>.loop.2D.bed > <nameofyoursample>_merged.loops.2D.bed
+
+merge2Dbed.pl <nameofyourfilecond1>.tad.2D.bed <nameofyourfilecond2>.tad.2D.bed > <nameofyoursample>_merged.tad.2D.bed
+
+#Find TADs and Loops by score
+
+findTADsAndLoops.pl score -tad <nameofyourfile>_merged.tad.2D.bed -loop <nameofyourfile>_merged.loop.2D.bed -o nameofyourfile_score -d TagDir1/ TagDir1.1/ TagDir2/ TagDir2.1/ -cpu 10 -res 5000,10000,25000  -window 35000,50000,75000
+
+#Differential expression of loops and tads
+
+getDiffExpression.pl <filename>_score_merged.loop.scores.txt Cond1 Cond1 Cond2 Cons2 -loop -batch 1 2 1 2 -simpleNorm -edgeR > <nameofyouroutput>_score_merged_edgeR_bacth.txt
+
