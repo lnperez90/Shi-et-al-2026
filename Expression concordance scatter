@@ -1,0 +1,138 @@
+############################################################
+# Expression concordance of conserved DV genes
+# (STRICT, duplicate-collapsed)
+# EXPRESSION CUTOFF = log10(baseMean + 1) >= 2
+############################################################
+suppressPackageStartupMessages({
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+})
+# ----------------------------
+# Parameters
+# ----------------------------
+expr_cutoff <- 2.0 # <<< CHANGED from 1.5 to 2
+fdr_cutoff <- 0.05
+fc_cutoff <- log2(2) # FC > 2
+# ----------------------------
+# Load + compute DV stats + apply thresholds (per species)
+# ----------------------------
+prep_table_strict <- function(file, sheet, gene_col) {
+read_excel(file, sheet = sheet) %>%
+mutate(
+gene_raw = as.character(.data[[gene_col]]),
+gene_key = tolower(gene_raw),
+baseMean = as.numeric(baseMean),
+log2FoldChange = as.numeric(log2FoldChange),
+padj = as.numeric(padj),
+# Make dorsal-up positive
+log2FC_D_vs_V = -log2FoldChange,
+expr_log10 = log10(baseMean + 1),
+direction = case_when(
+!is.na(log2FC_D_vs_V) & log2FC_D_vs_V > fc_cutoff ~ "Dorsal",
+!is.na(log2FC_D_vs_V) & log2FC_D_vs_V < -fc_cutoff ~ "Ventral",
+TRUE ~ NA_character_
+)
+) %>%
+filter(
+!is.na(gene_key),
+!is.na(direction),
+!is.na(padj) & padj < fdr_cutoff,
+!is.na(expr_log10) & expr_log10 >= expr_cutoff
+) %>%
+select(
+gene_key, gene_raw,
+direction, expr_log10, log2FC_D_vs_V, padj
+)
+}
+# ----------------------------
+# Collapse duplicates within species
+# (keep best representative per gene per direction)
+# ----------------------------
+collapse_one_per_gene <- function(df) {
+df %>%
+group_by(gene_key, direction) %>%
+arrange(padj, desc(abs(log2FC_D_vs_V)), desc(expr_log10)) %>%
+slice(1) %>%
+ungroup()
+}
+# ----------------------------
+# Read both species tables
+# ----------------------------
+anableps <- prep_table_strict(
+"Supplementary_Data_1.xlsx",
+"Anableps_RNAseq_D_vs_V",
+"Gene_name"
+) %>%
+collapse_one_per_gene()
+tetraodon <- prep_table_strict(
+"Supplementary_Data_4.xlsx",
+"Tetraodon_RNAseq_D_vs_V",
+"Gene_symbol"
+) %>%
+collapse_one_per_gene()
+# ----------------------------
+# Define concordant genes
+# Same orthologous symbol (case-insensitive) AND same DV direction
+# ----------------------------
+common_expr <- inner_join(
+anableps,
+tetraodon,
+by = c("gene_key", "direction"),
+suffix = c("_Anableps", "_Tetraodon")
+) %>%
+mutate(
+label = case_when(
+!is.na(gene_raw_Anableps) & gene_raw_Anableps != "" ~ gene_raw_Anableps,
+!is.na(gene_raw_Tetraodon) & gene_raw_Tetraodon != "" ~
+gene_raw_Tetraodon,
+TRUE ~ gene_key
+)
+)
+cat("Concordant genes (expr 2):", nrow(common_expr), "\n")≥
+cat(" Dorsal:", sum(common_expr$direction == "Dorsal"), "\n")
+cat(" Ventral:", sum(common_expr$direction == "Ventral"), "\n")
+# ----------------------------
+# Expression concordance scatter
+# ----------------------------
+p <- ggplot(
+common_expr,
+aes(x = expr_log10_Anableps, y = expr_log10_Tetraodon)
+) +
+geom_abline(slope = 1, intercept = 0, linetype = "dashed", linewidth = 0.5) +
+geom_point(aes(color = direction), size = 2) +
+geom_text_repel(
+aes(label = label),
+max.overlaps = Inf,
+box.padding = 0.4,
+point.padding = 0.25,
+min.segment.length = 0,
+seed = 1
+) +
+coord_equal() +
+labs(
+x = "Anableps expression: log10(baseMean + 1)",
+y = "Tetraodon expression: log10(baseMean + 1)",
+title = "Expression concordance of conserved DV genes",
+subtitle = paste0(
+"FDR<", fdr_cutoff,
+", FC>2, expr ", expr_cutoff,≥
+" (both species)"
+)
+) +
+theme_classic(base_size = 12)
+print(p)
+ggsave(
+"ExprConcordance_log10baseMean_expr2_COLLAPSED.pdf",
+p,
+width = 7,
+height = 7
+)
+ggsave(
+"ExprConcordance_log10baseMean_expr2_COLLAPSED.png",
+p,
+width = 7,
+height = 7,
+dpi = 300
+)
